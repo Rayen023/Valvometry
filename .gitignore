@@ -1,0 +1,8 @@
+ENV/
+*.csv
+*.xlsx
+*.log
+*.out
+*.t
+*.pt
+*.parquet

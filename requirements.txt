@@ -1,0 +1,9 @@
+numpy<1.24.0
+pandas
+scikit_learn
+torch
+torchaudio
+torchtext
+torchvision
+tqdm
+openpyxl
