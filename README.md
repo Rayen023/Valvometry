@@ -2,11 +2,11 @@
 # Valvometry
 
 ## Description
-The Valvometry project is dedicated to the classification of oyster genders (Male/Female) during their early life stages. This is achieved using intricate time series data from valvometry, a technique that employs electromagnetic sensors to record the number of microclosures exhibited by each oyster.
+This project is centered on the classification of oyster genders (Male/Female) during their early life stages using time series data. We leverage valvometry, a method that employs electromagnetic sensors to measure the micro closures of oysters, reflecting their opening and closing activity. The data, recorded every 0.1 ms over a 6-day period, comes in the form of extensive and intricate CSV files. It's important to highlight that this dataset contains anomalies and variations, with different sensor parameters used for each sample.
 
-The project predominantly uses AI models, with a focus on RNN models that incorporate LSTM layers. CNN models have also been explored, producing superior results in some instances. The models have been developed using Python and the PyTorch framework.
+To analyze this data, we employ AI models, particularly focusing on RNNs with LSTM layers and CNNs. The models have been developed using Python and the PyTorch framework.
 
-Data for this project consists of large and intricate CSV files that span over a period of 6 days, recording oyster openings every 0.1 ms. It's worth noting that the data has its fair share of anomalies and variations, especially considering that different sensor parameters are utilized for each sample.
+
 
 ## Visualization
 Sample plots can be found in the `./plots` directory.
