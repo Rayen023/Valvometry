@@ -133,7 +133,7 @@ model = FeedForwardModel(input_size, output_size, dropout)
 model.to(device)
 
 # Define the loss function and optimizer
-criterion = nn.BCELoss()  # Use BCELoss instead of BCEWithLogitsLoss for binary classification
+criterion = nn.BCELoss()  
 optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
 
