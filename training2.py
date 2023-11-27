@@ -28,10 +28,10 @@ train_df = pd.concat([train_df1, train_df2], ignore_index=True)"""
 train_df = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df2_after_norm_mem_reduce.csv")
 print(train_df.groupby('ID').size())
 
-lr = 0.00075
-num_epochs = 500
+lr = 0.000508
+num_epochs = 436
 batch_size = 8
-img_size = 256 
+img_size = 276 
 segment_hours = 8
 
 
@@ -207,7 +207,7 @@ test_transform = transforms.Compose([
 
 train_transform = transforms.Compose([
     transforms.Resize((img_size, img_size)),
-    transforms.RandomCrop((128, 128)),
+    transforms.RandomCrop((144, 144)),
     #transforms.RandomHorizontalFlip(p=0.5),
     transforms.ToTensor(),
 ])
@@ -231,15 +231,42 @@ test_loader = torch.utils.data.DataLoader(
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model = torchvision.models.efficientnet_b0()
+model = torchvision.models.efficientnet_b4()
 
-model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
-model.classifier.fc = nn.Linear(1000, 64)
-model.classifier.fc1 = nn.Linear(64, 2)
+"""model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+model.features[-1].fc = nn.AdaptiveAvgPool2d(output_size=1)
+model.avgpool = nn.Identity()
+model.classifier.fc = nn.Linear(1000, 512)
+model.classifier.fc1 = nn.Linear(512, 128)
+model.classifier.fc2 = nn.Linear(128, 5)
 model = model.to(device)
+"""
+
+# Initialize new output layer
+model.features[0][0] = nn.Conv2d(1, 48, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+model.features[-1].fc = nn.AdaptiveAvgPool2d(output_size=1)
+model.features[-1].fc3 = nn.Flatten()
+
+model.features[-1].fc1 = nn.Linear(in_features=1792, out_features=1000, bias=True)
+model.features[-1].fc2 = nn.Linear(in_features=1000, out_features=573, bias=True)
+model.avgpool = nn.Identity()
+model.classifier[1] = nn.Linear(573, 2)
+model = model.to(device)
+
+
+import os
+import time
+import torch
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, device, num_epochs=12):
     since = time.time()
+
+    train_losses = []
+    train_accuracies = []
+    test_losses = []
+    test_accuracies = []
 
     best_acc = 0.0
     best_epoch = 0
@@ -275,6 +302,9 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
 
         print('Train Loss: {:.4f} Train Acc: {:.4f}'.format(train_loss, train_acc))
 
+        train_losses.append(train_loss)
+        train_accuracies.append(train_acc.item())
+
         # Testing phase
         model.eval()
         running_test_loss = 0.0
@@ -293,21 +323,48 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
                 running_test_loss += loss.item() * inputs.size(0)
                 running_test_corrects += torch.sum(preds == labels.data)
 
-        test_loss = running_test_loss / len(test_dataloader.dataset)
-        test_acc = running_test_corrects.double() / len(test_dataloader.dataset)
+            test_loss = running_test_loss / len(test_dataloader.dataset)
+            test_acc = running_test_corrects.double() / len(test_dataloader.dataset)
 
-        print('Test Loss: {:.4f} Test Acc: {:.4f}'.format(test_loss, test_acc))
+            print('Test Loss: {:.4f} Test Acc: {:.4f}'.format(test_loss, test_acc))
 
-        if test_acc > best_acc:
-            best_acc = test_acc
-            best_epoch = epoch
-            #torch.save(model.state_dict(), os.path.join('/kaggle/working/', '{0:0=2d}.pth'.format(epoch+1)))
+            test_losses.append(test_loss)
+            test_accuracies.append(test_acc.item())
+
+            if test_acc > best_acc:
+                best_acc = test_acc
+                best_epoch = epoch
+                # Save the model state dict if needed
+                # torch.save(model.state_dict(), os.path.join('/path/to/save/', '{0:0=2d}.pth'.format(epoch+1)))
+
+    # Save losses and accuracies to CSV file if needed
+    # You can use pandas to save the lists to a CSV file
+
+    # Save the plots
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss')
+    plt.plot(range(1, num_epochs + 1), test_losses, label='Test Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.savefig('loss_plot.png')
+    plt.show()
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, num_epochs + 1), train_accuracies, label='Train Accuracy')
+    plt.plot(range(1, num_epochs + 1), test_accuracies, label='Test Accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.savefig('accuracy_plot.png')
+    plt.show()
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print(f'Best Acc: {best_acc},Best Epoch: {best_epoch} ')
+    print(f'Best Acc: {best_acc}, Best Epoch: {best_epoch}')
 
-    return model , best_acc ,  best_epoch
+    return model, best_acc, best_epoch
+
 
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -348,3 +405,42 @@ df = pd.concat([df, new_row], ignore_index=True)
 
 # Save the updated DataFrame back to the CSV file
 df.to_csv("/gpfs/scratch/rayen/Oysters/outputs.csv", index=False)
+
+
+def extract_features(data_loader):
+    features = []
+    labels = []
+    with torch.no_grad():
+        for inputs, batch_labels in data_loader:
+            inputs = inputs.to(device).float()
+            x = model.features(inputs)
+            features.append(x.cpu().numpy())
+            
+            labels.extend([label.item() for label in batch_labels])
+    features = np.vstack(features)
+    return features.squeeze(), np.array(labels).astype('int')
+
+train_features, train_labels = extract_features(train_loader)
+val_features, val_labels = extract_features(test_loader)  
+
+print(train_features.shape, train_labels.shape)
+print(val_features.shape, val_labels.shape)
+
+from sklearn.metrics import accuracy_score
+from lightgbm import LGBMClassifier
+from xgboost import XGBClassifier
+
+
+clf = LGBMClassifier(objective='binary')
+
+clf.fit(train_features, train_labels)
+
+accuracy = accuracy_score(val_labels, clf.predict(val_features))
+print(f'lightgbm Test Accuracy: {accuracy * 100:.2f}%')
+
+clf = XGBClassifier(device = "cuda")
+
+clf.fit(train_features, train_labels)
+
+accuracy = accuracy_score(val_labels, clf.predict(val_features))
+print(f'XGBClassifier Test Accuracy: {accuracy * 100:.2f}%')

@@ -14,6 +14,8 @@ import torchvision
 from torchvision import transforms
 from PIL import Image
 
+import optuna
+
 print('Importing df')
 """train_df1 = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df_nt_after_norm_mem_reduce.csv")
 print(train_df1.head())
@@ -28,10 +30,7 @@ train_df = pd.concat([train_df1, train_df2], ignore_index=True)"""
 train_df = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df2_after_norm_mem_reduce.csv")
 print(train_df.groupby('ID').size())
 
-lr = 0.00075
-num_epochs = 500
-batch_size = 8
-img_size = 256 
+ 
 segment_hours = 8
 
 
@@ -199,44 +198,15 @@ class ImageDataset(Dataset):
         return image, label
 
 
-test_transform = transforms.Compose([
-    transforms.Resize((img_size,img_size)),
-    transforms.ToTensor(),
-    
-])
-
-train_transform = transforms.Compose([
-    transforms.Resize((img_size, img_size)),
-    transforms.RandomCrop((128, 128)),
-    #transforms.RandomHorizontalFlip(p=0.5),
-    transforms.ToTensor(),
-])
-
-train_dataset = ImageDataset(X_train, y_train,transform=train_transform)
-test_dataset = ImageDataset(X_test, y_test,transform=test_transform)
-
-train_loader = torch.utils.data.DataLoader(
-    train_dataset,
-    batch_size=batch_size,
-    num_workers=4,
-    shuffle=True
-)
-test_loader = torch.utils.data.DataLoader(
-    test_dataset,
-    batch_size=batch_size,
-    num_workers=4,
-    shuffle=True
-)
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model = torchvision.models.efficientnet_b0()
 
-model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
-model.classifier.fc = nn.Linear(1000, 64)
-model.classifier.fc1 = nn.Linear(64, 2)
-model = model.to(device)
+# Initialize new output layer
+
+
+
 
 def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, device, num_epochs=12):
     since = time.time()
@@ -310,41 +280,69 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
     return model , best_acc ,  best_epoch
 
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
-# Setup the loss function
-criterion = nn.CrossEntropyLoss()
+def objective(trial):
+    
+    param = {
+        "batch_size": trial.suggest_int("batch_size", 7, 10), 
+        "lr": trial.suggest_float("lr", 0.0003, 0.0008),
+        "epochs": trial.suggest_int("epochs", 410, 590),
+        "layer_size": trial.suggest_int("layer_size", 80, 600),
+        "crop_size": trial.suggest_int("crop_size", 120, 170),
+        "weight_decay": trial.suggest_float("weight_decay", 0.00001, 0.0005),
+        "img_size" : trial.suggest_int("img_size", 230, 340),
+    }
 
-# Train model
-model , best_acc, best_epoch  = train_model(model, train_loader,test_loader, criterion, optimizer, device , num_epochs)
+    model = torchvision.models.efficientnet_b0()
 
-print(f"lr = {lr}")
-print(f"num_epochs = {num_epochs}")
-print(f"batch_size = {batch_size}")
-print(f"img_size = {img_size}")
-print(f"segment_hours = {segment_hours}")
+    model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+    model.features[-1].fc = nn.AdaptiveAvgPool2d(output_size=1)
+    model.features[-1].fc3 = nn.Flatten()
 
-transform_str = "\n".join([str(t) for t in train_transform.transforms])
-print(transform_str)
+    model.features[-1].fc1 = nn.Linear(in_features=1280, out_features=1000, bias=True)
+    model.features[-1].fc2 = nn.Linear(in_features=1000, out_features=param['layer_size'], bias=True)
+    model.avgpool = nn.Identity()
+    model.classifier[1] = nn.Linear(param['layer_size'], 2)
+    model = model.to(device)
+
+    test_transform = transforms.Compose([
+    transforms.Resize((param["img_size"],param["img_size"])),
+    transforms.ToTensor(),
+    
+    ])
+
+    train_transform = transforms.Compose([
+        transforms.Resize((param["img_size"], param["img_size"])),
+        transforms.RandomCrop((param['crop_size'], param['crop_size'])),
+        #transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ToTensor(),
+    ])
+
+    train_dataset = ImageDataset(X_train, y_train,transform=train_transform)
+    test_dataset = ImageDataset(X_test, y_test,transform=test_transform)
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=param['batch_size'],
+        num_workers=4,
+        shuffle=True
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        batch_size=param['batch_size'],
+        num_workers=4,
+        shuffle=True
+    )
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=param["lr"], weight_decay=param["weight_decay"])
+    criterion = nn.CrossEntropyLoss()
+    model , best_acc, best_epoch  = train_model(model, train_loader,test_loader,
+                                                 criterion, optimizer, device , param['epochs'])
+    
+    return best_acc
 
 
-# Read the existing DataFrame
-df = pd.read_csv("/gpfs/scratch/rayen/Oysters/outputs.csv", index_col = None)
-
-# Create a new DataFrame for the new values
-new_row = pd.DataFrame({
-    "lr": [lr],
-    "num_epochs": [num_epochs],
-    "batch_size": [batch_size],
-    "img_size": [img_size],
-    "segment_hours": [segment_hours],
-    "Best Acc": [best_acc.cpu().numpy()],
-    "Best Epoch": [best_epoch],
-    "transforms": [transform_str]
-})
-
-# Concatenate the existing DataFrame with the new row
-df = pd.concat([df, new_row], ignore_index=True)
-
-# Save the updated DataFrame back to the CSV file
-df.to_csv("/gpfs/scratch/rayen/Oysters/outputs.csv", index=False)
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=10)
+print('Number of finished trials:', len(study.trials))
+print('Best trial:', study.best_trial.params)
