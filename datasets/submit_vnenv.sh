@@ -9,4 +9,4 @@ module load python/3.9 scipy-stack
 source ../ENV/bin/activate
 
 
-python plots.py
+python plots6.py

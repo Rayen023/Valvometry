@@ -15,23 +15,19 @@ from torchvision import transforms
 from PIL import Image
 
 print('Importing df')
-"""train_df1 = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df_nt_after_norm_mem_reduce.csv")
-print(train_df1.head())
-train_df2 = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df2_after_norm_mem_reduce.csv")
-print(train_df2.head())
-
-train_df1 = train_df1[['ID','sequence','label']]
-train_df1 = train_df1.rename(columns={'sequence': 'Sequence'})
-
-train_df = pd.concat([train_df1, train_df2], ignore_index=True)"""
 
 train_df = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df2_after_norm_mem_reduce.csv")
 print(train_df.groupby('ID').size())
 
-lr = 0.00075
-num_epochs = 500
+print(f'train_df.shape with E_4 {train_df.shape}')
+#train_df = train_df[~train_df['ID'].isin(['E_4',])]
+print(f'train_df.shape without E_4 {train_df.shape}')
+
+
+lr = 0.00051
+num_epochs = 436
 batch_size = 8
-img_size = 256 
+img_size = 276 
 segment_hours = 8
 
 
@@ -207,7 +203,7 @@ test_transform = transforms.Compose([
 
 train_transform = transforms.Compose([
     transforms.Resize((img_size, img_size)),
-    transforms.RandomCrop((128, 128)),
+    transforms.RandomCrop((144, 144)),
     #transforms.RandomHorizontalFlip(p=0.5),
     transforms.ToTensor(),
 ])

@@ -25,23 +25,16 @@ while os.path.exists(dir_name):
 # Create the new directory
 os.makedirs(dir_name)
 
-# Define the Savitzky-Golay filter parameters
-window_length = 10000  # Window length for smoothing
-polyorder = 3  # Order of the polynomial used for fitting
-
 print('Plotting')
 # Plot and save each sequence within the groups
 for name, group in grouped:
-    print(f'name : {name}, group : {group}')
+    print(f'name: {name}, group: {group}')
 
-    # Apply the Savitzky-Golay filter to the 'Sequence' column
-    smoothed_sequence = savgol_filter(group['Sequence'], window_length, polyorder)
-
-    plt.figure(figsize=(80, 60))
-    plt.plot(group.index, smoothed_sequence)  # Plot the smoothed sequence
-    plt.xlabel('Index')
-    plt.ylabel('Smoothed Sequence')
-    plt.title(f'Smoothed Sequence for {name}')
+    plt.figure(figsize=(100, 30))
+    plt.plot(group.index, group['Sequence'])  # Plot the smoothed sequence
+    plt.xlabel('Index', fontsize=35)  # Adjust the fontsize for x-axis label
+    plt.ylabel('Sequence', fontsize=35)  # Adjust the fontsize for y-axis label
+    plt.title(f'Sequence for {name}', fontsize=35)  # Adjust the fontsize for title
 
     # Define the file name within the new directory
     file_name = f'{dir_name}/{name}_{group["label"].iloc[0]}.png'
@@ -49,7 +42,8 @@ for name, group in grouped:
     plt.savefig(file_name)
     plt.close()
 
-print(f"Plots with Savitzky-Golay filter applied saved in the '{dir_name}' folder.")
+print(f"Plots saved in the '{dir_name}' folder.")
+
 
 """# Separate the data into label 1 and label 0
 label_1_data = df[df['label'] == 1]

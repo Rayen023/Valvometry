@@ -29,7 +29,7 @@ train_df = pd.concat([train_df1, train_df2], ignore_index=True)"""
 
 train_df = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df2_after_norm_mem_reduce.csv")
 print(train_df.groupby('ID').size())
-
+train_df = train_df[~train_df['ID'].isin(['E_4',])]
  
 segment_hours = 8
 
@@ -291,9 +291,10 @@ def objective(trial):
         "crop_size": trial.suggest_int("crop_size", 120, 170),
         "weight_decay": trial.suggest_float("weight_decay", 0.00001, 0.0005),
         "img_size" : trial.suggest_int("img_size", 230, 340),
+        "flip_percent" : trial.suggest_float("flip_percent", 0.001, 0.2),
     }
 
-    model = torchvision.models.efficientnet_b0()
+    model = torchvision.models.efficientnet_b1()
 
     model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
     model.features[-1].fc = nn.AdaptiveAvgPool2d(output_size=1)
@@ -314,7 +315,7 @@ def objective(trial):
     train_transform = transforms.Compose([
         transforms.Resize((param["img_size"], param["img_size"])),
         transforms.RandomCrop((param['crop_size'], param['crop_size'])),
-        #transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomHorizontalFlip(p=param['flip_percent']),
         transforms.ToTensor(),
     ])
 

@@ -15,18 +15,14 @@ from torchvision import transforms
 from PIL import Image
 
 print('Importing df')
-"""train_df1 = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df_nt_after_norm_mem_reduce.csv")
-print(train_df1.head())
+train_df = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df_nt_after_norm_mem_reduce.csv")
+print(train_df.head())
+
 train_df2 = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df2_after_norm_mem_reduce.csv")
 print(train_df2.head())
 
-train_df1 = train_df1[['ID','sequence','label']]
-train_df1 = train_df1.rename(columns={'sequence': 'Sequence'})
-
-train_df = pd.concat([train_df1, train_df2], ignore_index=True)"""
-
-train_df = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df2_after_norm_mem_reduce.csv")
-print(train_df.groupby('ID').size())
+train_df = train_df[['ID','sequence','label']]
+train_df = train_df.rename(columns={'sequence': 'Sequence'})
 
 lr = 0.000508
 num_epochs = 436
@@ -102,14 +98,15 @@ def reduce_mem_usage(props):
     return props
 
 train_df = reduce_mem_usage(train_df)
+train_df2 = reduce_mem_usage(train_df2)
+
 gc.collect()
 
+segment_hours = 8
 
+continuous_features = ['Sequence']
 
-
-# Filter out unwanted 'ID' values
-#train_df = train_df[~train_df['ID'].isin(['D1', 'A1', 'A4', 'C4', 'E3', 'F1', 'F4', 'G1', 'G3', 'G4', 'I2'])]
-
+# Define a function to segment the data within each group
 def segment_group(group, segments):
     segment_length = len(group) // segments
     segmented_dfs = []
@@ -124,35 +121,55 @@ def segment_group(group, segments):
 
     return pd.concat(segmented_dfs)
 
+def sequence_df(df, hours, continuous_features):
+    
+    nseconds = df[df['ID']=='A_2'].shape[0] /10
+    if int(nseconds) == 0 :
+        nseconds = df[df['ID']=='A2'].shape[0] /10
+    total_hours = nseconds / 3600
+    total_days = total_hours / 24
+    nbr_segments = int(total_hours / hours)
+    print(f'total_days : {total_days} total_hours : {total_hours}, segments : {nbr_segments}')
+    
+    expanded_df = df.groupby('ID').apply(segment_group, nbr_segments)
 
-nseconds = train_df[train_df['ID']=='A_2'].shape[0] /10
-if int(nseconds) == 0 :
-    nseconds = train_df[train_df['ID']=='A2'].shape[0] /10
-total_hours = nseconds / 3600
-total_days = total_hours / 24
-nbr_segments = int(total_hours / segment_hours)
-print(f'total_days : {total_days} total_hours : {total_hours}, segments : {nbr_segments}')
-# Group by 'ID' and apply the segmentation function to each group
-expanded_df = train_df.groupby('ID').apply(segment_group, nbr_segments)
-expanded_df.reset_index(drop=True, inplace=True)
-train_df = expanded_df.astype(train_df.dtypes)
+    # Reset the index and convert types if needed
+    expanded_df.reset_index(drop=True, inplace=True)
+    df = expanded_df.astype(df.dtypes)    
 
-min_count = train_df.groupby("ID").size().min()
-print(f"Duree de chaque sequence = {min_count/36000} heures")
+    min_count = df.groupby("ID").size().min()
+    print(f"Min_count {min_count} Duree de chaque sequence = {min_count/36000} heures")
 
-# Group the DataFrame by 'ID' and extract the values for each group
-sequences = []
-current_sequence = []
-grouped = train_df.groupby('ID')
-continuous_features = ['Sequence']
-for name, group in tqdm(grouped):
-    current_sequence = group[continuous_features].values
-    sequences.append(current_sequence[:min_count])
+    sequences = []
+    current_sequence = []
+    # Group the DataFrame by 'ID' and extract the values for each group
+    grouped = df.groupby('ID')
 
-X = np.array(np.array(sequences), dtype=np.float32)
-y = np.array(train_df.groupby('ID')['label'].first().values, dtype=np.int8)
+    for name, group in tqdm(grouped):
+        current_sequence = group[continuous_features].values
+        sequences.append(current_sequence[:min_count])
+
+    X = np.array(np.array(sequences), dtype=np.float32)
+    y = np.array(df.groupby('ID')['label'].first().values, dtype=int)
+
+    y = np.array(y).astype(int).squeeze()
+
+    print(f"input_size = {X.shape}, output_size = {y.shape}")
+    
+    return X.squeeze(),y.squeeze(), min_count
+
+X, y , min_count= sequence_df(train_df, segment_hours, continuous_features)
+X2, y2, min_count2 = sequence_df(train_df2, segment_hours, continuous_features)
+
+min_count = min(min_count, min_count2)
+
+X, X2 = X[:, :min_count], X2[:, :min_count]
 
 print(f"input_size = {X.shape}, output_size = {y.shape}")
+print(f"input_size = {X2.shape}, output_size = {y2.shape}")
+
+X = np.concatenate((X, X2), axis=0)
+y = np.concatenate((y, y2), axis=0)
 
 def factors(n):
     result = []
@@ -169,8 +186,6 @@ print(factors_min_count)
 print("Middle Values:", middle_values)  # Print the two middle values
 
 images = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X]
-
-y = np.array(y).astype(int).squeeze()
 
 # Split the images and labels into train and test sets.
 X_train, X_test, y_train, y_test = train_test_split(images, y, test_size=0.2)
