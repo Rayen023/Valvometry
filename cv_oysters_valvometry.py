@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
@@ -14,23 +15,20 @@ import torchvision
 from torchvision import transforms
 from PIL import Image
 
+gc.collect()
+
 print('Importing df')
 
-train_df = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df_nt_after_norm_mem_reduce.csv")
+train_df = pd.read_csv("/gpfs/scratch/rayen/Oysters/datasets/train_df2_after_norm_mem_reduce.csv")
+print(train_df.head())
+continuous_features = 'Sequence'
+continuous_features = [col for col in train_df.columns if col.lower() == continuous_features.lower()]
 
-print(train_df.groupby('ID').size())
-
-print(f'train_df.shape with E_4 {train_df.shape}')
-train_df = train_df[~train_df['ID'].isin(['D1', 'A1', 'A4', 'C4', 'E3', 'F1', 'F4', 'G1', 'G3', 'G4', 'I2'])]
-print(f'train_df.shape without E_4 {train_df.shape}')
-
-
-lr = 0.00051
+lr = 0.000508
 num_epochs = 436
 batch_size = 8
-img_size = 276 
+img_size = 276
 segment_hours = 8
-
 
 def reduce_mem_usage(props):
     start_mem_usg = props.memory_usage().sum() / 1024**2
@@ -99,14 +97,10 @@ def reduce_mem_usage(props):
     return props
 
 train_df = reduce_mem_usage(train_df)
+
 gc.collect()
 
-
-
-
-# Filter out unwanted 'ID' values
-#train_df = train_df[~train_df['ID'].isin(['D1', 'A1', 'A4', 'C4', 'E3', 'F1', 'F4', 'G1', 'G3', 'G4', 'I2'])]
-
+# Define a function to segment the data within each group
 def segment_group(group, segments):
     segment_length = len(group) // segments
     segmented_dfs = []
@@ -121,33 +115,56 @@ def segment_group(group, segments):
 
     return pd.concat(segmented_dfs)
 
+import re
+def sequence_df(df, hours, continuous_features):
 
-nseconds = train_df[train_df['ID']=='A_2'].shape[0] /10
-if int(nseconds) == 0 :
-    nseconds = train_df[train_df['ID']=='A2'].shape[0] /10
-total_hours = nseconds / 3600
-total_days = total_hours / 24
-nbr_segments = int(total_hours / segment_hours)
-print(f'total_days : {total_days} total_hours : {total_hours}, segments : {nbr_segments}')
-# Group by 'ID' and apply the segmentation function to each group
-expanded_df = train_df.groupby('ID').apply(segment_group, nbr_segments)
-expanded_df.reset_index(drop=True, inplace=True)
-train_df = expanded_df.astype(train_df.dtypes)
+    nseconds = train_df['ID'].value_counts().get('A2', 0) / 10
+    if int(nseconds) == 0 :
+        nseconds = train_df['ID'].value_counts().get('A_2', 0) / 10
+    total_hours = nseconds / 3600
+    total_days = total_hours / 24
+    nbr_segments = int(total_hours / hours)
+    print(f'total_days : {total_days} total_hours : {total_hours}, segments : {nbr_segments}')
 
-min_count = train_df.groupby("ID").size().min()
-print(f"Duree de chaque sequence = {min_count/36000} heures")
+    expanded_df = df.groupby('ID').apply(segment_group, nbr_segments)
 
-# Group the DataFrame by 'ID' and extract the values for each group
-sequences = []
-current_sequence = []
-grouped = train_df.groupby('ID')
-continuous_features = ['sequence']
-for name, group in tqdm(grouped):
-    current_sequence = group[continuous_features].values
-    sequences.append(current_sequence[:min_count])
+    # Reset the index and convert types if needed
+    expanded_df.reset_index(drop=True, inplace=True)
+    df = expanded_df.astype(df.dtypes)
 
-X = np.array(np.array(sequences), dtype=np.float32)
-y = np.array(train_df.groupby('ID')['label'].first().values, dtype=np.int8)
+    min_count = df.groupby("ID").size().min()
+    print(f"Min_count {min_count} Duree de chaque sequence = {min_count/36000} heures")
+
+    # Group the DataFrame by 'ID' and extract the values for each group
+    grouped = df.groupby('ID')
+
+    # Define a custom sorting function
+    def natural_sort_key(s):
+        return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+
+    # Initialize lists
+    sequences = []
+    ids = []
+
+    # Iterate over the grouped data using the sorted group names
+    for name in sorted(grouped.groups.keys(), key=natural_sort_key):
+        group = grouped.get_group(name)
+        current_sequence = group[continuous_features].values
+        sequences.append(current_sequence[:min_count])
+        ids.append(name)
+
+    # Using index splitting for train and test
+
+    X = np.array(np.array(sequences), dtype=np.float32)
+    y = np.array(df.groupby('ID')['label'].first().values, dtype=int)
+
+    y = np.array(y).astype(int).squeeze()
+
+    print(f"input_size = {X.shape}, output_size = {y.shape}")
+
+    return X.squeeze(),y.squeeze(), min_count, ids
+
+X, y, min_count, ids = sequence_df(train_df, segment_hours, continuous_features)
 
 print(f"input_size = {X.shape}, output_size = {y.shape}")
 
@@ -164,17 +181,6 @@ middle_values = factors_min_count[len(factors_min_count) // 2 - 1:len(factors_mi
 
 print(factors_min_count)
 print("Middle Values:", middle_values)  # Print the two middle values
-
-images = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X]
-
-y = np.array(y).astype(int).squeeze()
-
-# Split the images and labels into train and test sets.
-X_train, X_test, y_train, y_test = train_test_split(images, y, test_size=0.2)
-print(f"X_train shape: {len(X_train)}, X_test shape: {len(X_test)}, y_train shape: {y_train.shape}, y_test shape: {y_test.shape}")
-
-print(type(X_train) , len(X_train))
-
 
 class ImageDataset(Dataset):
     def __init__(self, images_series, labels, transform=None):
@@ -195,48 +201,16 @@ class ImageDataset(Dataset):
 
         return image, label
 
-
-test_transform = transforms.Compose([
-    transforms.Resize((img_size,img_size)),
-    transforms.ToTensor(),
-    
-])
-
-train_transform = transforms.Compose([
-    transforms.Resize((img_size, img_size)),
-    transforms.RandomCrop((144, 144)),
-    #transforms.RandomHorizontalFlip(p=0.5),
-    transforms.ToTensor(),
-])
-
-train_dataset = ImageDataset(X_train, y_train,transform=train_transform)
-test_dataset = ImageDataset(X_test, y_test,transform=test_transform)
-
-train_loader = torch.utils.data.DataLoader(
-    train_dataset,
-    batch_size=batch_size,
-    num_workers=4,
-    shuffle=True
-)
-test_loader = torch.utils.data.DataLoader(
-    test_dataset,
-    batch_size=batch_size,
-    num_workers=4,
-    shuffle=True
-)
-
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model = torchvision.models.efficientnet_b0()
-
-model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
-model.classifier.fc = nn.Linear(1000, 64)
-model.classifier.fc1 = nn.Linear(64, 2)
-model = model.to(device)
-
-def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, device, num_epochs=12):
+#TODO use the id_indices to keep track of the ones correctly, need to take a batch size that divises my shit, or just print each time the id_indices and the y_test to make sure they correspond, and need for each ID to keep track, how can i do this when i am using 3 IDs each time, verify maa zhor si with each ID , but like my training time will be *num_IDS which is a looot *16 and *22 for this dataset which is unacceptable
+def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, device, num_epochs):
     since = time.time()
+
+    train_losses = []
+    train_accuracies = []
+    test_losses = []
+    test_accuracies = []
 
     best_acc = 0.0
     best_epoch = 0
@@ -272,6 +246,9 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
 
         print('Train Loss: {:.4f} Train Acc: {:.4f}'.format(train_loss, train_acc))
 
+        train_losses.append(train_loss)
+        train_accuracies.append(train_acc.item())
+
         # Testing phase
         model.eval()
         running_test_loss = 0.0
@@ -281,31 +258,99 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
             for inputs, labels in test_dataloader:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
+                print(labels)
 
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
 
                 _, preds = torch.max(outputs, 1)
+                print('preds', preds)
 
                 running_test_loss += loss.item() * inputs.size(0)
                 running_test_corrects += torch.sum(preds == labels.data)
 
-        test_loss = running_test_loss / len(test_dataloader.dataset)
-        test_acc = running_test_corrects.double() / len(test_dataloader.dataset)
+            test_loss = running_test_loss / len(test_dataloader.dataset)
+            test_acc = running_test_corrects.double() / len(test_dataloader.dataset)
 
-        print('Test Loss: {:.4f} Test Acc: {:.4f}'.format(test_loss, test_acc))
+            print('Test Loss: {:.4f} Test Acc: {:.4f}'.format(test_loss, test_acc))
 
-        if test_acc > best_acc:
-            best_acc = test_acc
-            best_epoch = epoch
-            #torch.save(model.state_dict(), os.path.join('/kaggle/working/', '{0:0=2d}.pth'.format(epoch+1)))
+            test_losses.append(test_loss)
+            test_accuracies.append(test_acc.item())
+
+            if test_acc > best_acc:
+                best_acc = test_acc
+                best_epoch = epoch
+                # Save the model state dict if needed
+                # torch.save(model.state_dict(), os.path.join('/path/to/save/', '{0:0=2d}.pth'.format(epoch+1)))
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print(f'Best Acc: {best_acc},Best Epoch: {best_epoch} ')
+    print(f'Best Acc: {best_acc}, Best Epoch: {best_epoch}')
 
-    return model , best_acc ,  best_epoch
+    return model, best_acc, best_epoch
 
+IDs = train_df.ID.unique()
+print(type(IDs), IDs)
+
+n_ids = 3
+
+# Group IDs into sets of three
+grouped_ids = [IDs[i:i + n_ids] for i in range(0, len(IDs), n_ids)]
+
+print(grouped_ids)
+
+group = grouped_ids[0]   # Iterate over IDs in the current group
+group = ['A_1', 'B_2']
+id_indices = []
+for ID in group:
+    id_indices.extend([i for i, val in enumerate(ids) if val.startswith(ID)])
+print(id_indices)
+
+complement_indices = np.setdiff1d(np.arange(len(ids)), id_indices)
+
+X_train, X_test, y_train, y_test = X[complement_indices], X[id_indices], y[complement_indices], y[id_indices]
+print(f"X_train shape: {len(X_train)}, X_test shape: {len(X_test)}, y_train shape: {y_train.shape}, y_test shape: {y_test.shape}")
+X_train = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X_train]
+X_test = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X_test]
+
+train_transform = transforms.Compose([
+    transforms.Resize((img_size, img_size)),
+    transforms.RandomCrop((144, 144)),
+    transforms.ToTensor(),
+])
+
+test_transform = transforms.Compose([
+    transforms.Resize((img_size,img_size)),
+    transforms.RandomCrop((144, 144)), #TODO
+    transforms.ToTensor(),
+])
+
+train_dataset = ImageDataset(X_train, y_train,transform=train_transform)
+test_dataset = ImageDataset(X_test, y_test,transform=test_transform)
+
+train_loader = torch.utils.data.DataLoader(
+    train_dataset,
+    batch_size=batch_size,
+    num_workers=4,
+    shuffle=True
+)
+test_loader = torch.utils.data.DataLoader(
+    test_dataset,
+    batch_size=batch_size,
+    num_workers=4,
+    shuffle=False
+)
+model = torchvision.models.efficientnet_b0()
+# Initialize new output layer
+model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+model.features[-1].fc = nn.AdaptiveAvgPool2d(output_size=1)
+model.features[-1].fc3 = nn.Flatten()
+
+model.features[-1].fc1 = nn.Linear(in_features=1280, out_features=1000, bias=True)
+model.features[-1].fc2 = nn.Linear(in_features=1000, out_features=573, bias=True)
+model.avgpool = nn.Identity()
+model.classifier[1] = nn.Linear(573, 2)
+model = model.to(device)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
@@ -315,6 +360,9 @@ criterion = nn.CrossEntropyLoss()
 # Train model
 model , best_acc, best_epoch  = train_model(model, train_loader,test_loader, criterion, optimizer, device , num_epochs)
 
+# take indices and compare , will do it in parallel and manually choose the 3 group IDs each time
+model(X_test)
+
 print(f"lr = {lr}")
 print(f"num_epochs = {num_epochs}")
 print(f"batch_size = {batch_size}")
@@ -323,25 +371,3 @@ print(f"segment_hours = {segment_hours}")
 
 transform_str = "\n".join([str(t) for t in train_transform.transforms])
 print(transform_str)
-
-
-# Read the existing DataFrame
-df = pd.read_csv("/gpfs/scratch/rayen/Oysters/outputs.csv", index_col = None)
-
-# Create a new DataFrame for the new values
-new_row = pd.DataFrame({
-    "lr": [lr],
-    "num_epochs": [num_epochs],
-    "batch_size": [batch_size],
-    "img_size": [img_size],
-    "segment_hours": [segment_hours],
-    "Best Acc": [best_acc.cpu().numpy()],
-    "Best Epoch": [best_epoch],
-    "transforms": [transform_str]
-})
-
-# Concatenate the existing DataFrame with the new row
-df = pd.concat([df, new_row], ignore_index=True)
-
-# Save the updated DataFrame back to the CSV file
-df.to_csv("/gpfs/scratch/rayen/Oysters/outputs.csv", index=False)
