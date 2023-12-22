@@ -1,3 +1,5 @@
+print('import packages')
+
 import os
 import gc
 import time
@@ -24,8 +26,10 @@ print(train_df.head())
 continuous_features = 'Sequence'
 continuous_features = [col for col in train_df.columns if col.lower() == continuous_features.lower()]
 
+train_df = train_df[~train_df['ID'].isin(['A_1','B_3','B_4','E_4',])]
+
 lr = 0.000508
-num_epochs = 436
+num_epochs = 200
 batch_size = 8
 img_size = 276
 segment_hours = 8
@@ -118,9 +122,9 @@ def segment_group(group, segments):
 import re
 def sequence_df(df, hours, continuous_features):
 
-    nseconds = train_df['ID'].value_counts().get('A2', 0) / 10
+    nseconds = train_df['ID'].value_counts().get('D3', 0) / 10
     if int(nseconds) == 0 :
-        nseconds = train_df['ID'].value_counts().get('A_2', 0) / 10
+        nseconds = train_df['ID'].value_counts().get('D_3', 0) / 10
     total_hours = nseconds / 3600
     total_days = total_hours / 24
     nbr_segments = int(total_hours / hours)
@@ -128,9 +132,12 @@ def sequence_df(df, hours, continuous_features):
 
     expanded_df = df.groupby('ID').apply(segment_group, nbr_segments)
 
-    # Reset the index and convert types if needed
+    print('Reseting the index and converting types')
+
     expanded_df.reset_index(drop=True, inplace=True)
     df = expanded_df.astype(df.dtypes)
+
+    print('Calculating min count')
 
     min_count = df.groupby("ID").size().min()
     print(f"Min_count {min_count} Duree de chaque sequence = {min_count/36000} heures")
@@ -142,7 +149,6 @@ def sequence_df(df, hours, continuous_features):
     def natural_sort_key(s):
         return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
-    # Initialize lists
     sequences = []
     ids = []
 
@@ -158,13 +164,14 @@ def sequence_df(df, hours, continuous_features):
     X = np.array(np.array(sequences), dtype=np.float32)
     y = np.array(df.groupby('ID')['label'].first().values, dtype=int)
 
-    y = np.array(y).astype(int).squeeze()
+    y = np.array(y, dtype=int).squeeze()
+
 
     print(f"input_size = {X.shape}, output_size = {y.shape}")
 
-    return X.squeeze(),y.squeeze(), min_count, ids
+    return X.squeeze(),y.squeeze(), min_count, ids, nbr_segments
 
-X, y, min_count, ids = sequence_df(train_df, segment_hours, continuous_features)
+X, y, min_count, ids, nbr_segments = sequence_df(train_df, segment_hours, continuous_features)
 
 print(f"input_size = {X.shape}, output_size = {y.shape}")
 
@@ -176,16 +183,16 @@ def factors(n):
             result.append(n // i)
     return sorted(result)
 
-factors_min_count = factors(min_count)  # Calculate the factors of min_count
+factors_min_count = factors(min_count)  
 middle_values = factors_min_count[len(factors_min_count) // 2 - 1:len(factors_min_count) // 2 + 1]  # Get the two middle values
 
 print(factors_min_count)
-print("Middle Values:", middle_values)  # Print the two middle values
-
+print("Middle Values:", middle_values)  
 class ImageDataset(Dataset):
-    def __init__(self, images_series, labels, transform=None):
+    def __init__(self, images_series, labels, ids, transform=None):
         self.images_series = images_series
         self.labels = labels
+        self.ids = ids
         self.transform = transform
 
     def __len__(self):
@@ -199,11 +206,12 @@ class ImageDataset(Dataset):
 
         label = self.labels[idx]
 
-        return image, label
+        id = self.ids[idx]
+
+        return image, label, id
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-#TODO use the id_indices to keep track of the ones correctly, need to take a batch size that divises my shit, or just print each time the id_indices and the y_test to make sure they correspond, and need for each ID to keep track, how can i do this when i am using 3 IDs each time, verify maa zhor si with each ID , but like my training time will be *num_IDS which is a looot *16 and *22 for this dataset which is unacceptable
 def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, device, num_epochs):
     since = time.time()
 
@@ -224,7 +232,7 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
         running_train_loss = 0.0
         running_train_corrects = 0
 
-        for inputs, labels in train_dataloader:
+        for inputs, labels, _ in train_dataloader:
             inputs = inputs.to(device)
             labels = labels.to(device)
 
@@ -255,10 +263,11 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
         running_test_corrects = 0
 
         with torch.no_grad():
-            for inputs, labels in test_dataloader:
+            for inputs, labels, ids in test_dataloader:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
                 print(labels)
+                print(f' test_ids : {ids}')
 
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
@@ -290,84 +299,103 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
     return model, best_acc, best_epoch
 
 IDs = train_df.ID.unique()
-print(type(IDs), IDs)
+Y = y[::nbr_segments]
+print(len(Y))
 
-n_ids = 3
+# Group IDs by label
+label_0_ids = [id for id, label in zip(IDs, Y) if label == 0]
+label_1_ids = [id for id, label in zip(IDs, Y) if label == 1]
 
-# Group IDs into sets of three
-grouped_ids = [IDs[i:i + n_ids] for i in range(0, len(IDs), n_ids)]
+import random
 
-print(grouped_ids)
+def random_pairs(ids_0, ids_1):
+    pairs = []
+    min_len = min(len(ids_0), len(ids_1))
+    
+    for _ in range(min_len):
+        id_0 = random.choice(ids_0)
+        id_1 = random.choice(ids_1)
+        
+        pair = [id_0, id_1]
+        pairs.append(pair)
+        
+        ids_0.remove(id_0)
+        ids_1.remove(id_1)
+    
+    return pairs
 
-group = grouped_ids[0]   # Iterate over IDs in the current group
-group = ['A_1', 'B_2']
-id_indices = []
-for ID in group:
-    id_indices.extend([i for i, val in enumerate(ids) if val.startswith(ID)])
-print(id_indices)
+pairs = random_pairs(label_0_ids, label_1_ids)
+print("Random pairs:", pairs)
 
-complement_indices = np.setdiff1d(np.arange(len(ids)), id_indices)
+for group in pairs : 
+    id_indices = []
+    for ID in group : 
+        id_indices.extend([i for i, val in enumerate(ids) if val.startswith(ID)])
+    
+    complement_indices = np.setdiff1d(np.arange(len(ids)), id_indices)
 
-X_train, X_test, y_train, y_test = X[complement_indices], X[id_indices], y[complement_indices], y[id_indices]
-print(f"X_train shape: {len(X_train)}, X_test shape: {len(X_test)}, y_train shape: {y_train.shape}, y_test shape: {y_test.shape}")
-X_train = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X_train]
-X_test = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X_test]
+    print(f"Current test IDs : {group}")
+    
+    ids = np.array(ids)
+    X_train, X_test, y_train, y_test = X[complement_indices], X[id_indices], y[complement_indices], y[id_indices]
 
-train_transform = transforms.Compose([
-    transforms.Resize((img_size, img_size)),
-    transforms.RandomCrop((144, 144)),
-    transforms.ToTensor(),
-])
+    train_ids, test_ids = ids[complement_indices] , ids[id_indices]
 
-test_transform = transforms.Compose([
-    transforms.Resize((img_size,img_size)),
-    transforms.RandomCrop((144, 144)), #TODO
-    transforms.ToTensor(),
-])
+    print(f"X_train shape: {len(X_train)}, X_test shape: {len(X_test)}, y_train shape: {y_train.shape}, y_test shape: {y_test.shape}")
+    X_train = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X_train]
+    X_test = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X_test]
 
-train_dataset = ImageDataset(X_train, y_train,transform=train_transform)
-test_dataset = ImageDataset(X_test, y_test,transform=test_transform)
+    train_transform = transforms.Compose([
+        transforms.Resize((img_size, img_size)),
+        transforms.RandomCrop((144, 144)),
+        transforms.ToTensor(),
+    ])
 
-train_loader = torch.utils.data.DataLoader(
-    train_dataset,
-    batch_size=batch_size,
-    num_workers=4,
-    shuffle=True
-)
-test_loader = torch.utils.data.DataLoader(
-    test_dataset,
-    batch_size=batch_size,
-    num_workers=4,
-    shuffle=False
-)
-model = torchvision.models.efficientnet_b0()
-# Initialize new output layer
-model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
-model.features[-1].fc = nn.AdaptiveAvgPool2d(output_size=1)
-model.features[-1].fc3 = nn.Flatten()
+    test_transform = transforms.Compose([
+        transforms.Resize((img_size,img_size)),
+        transforms.RandomCrop((144, 144)), #TODO
+        transforms.ToTensor(),
+    ])
 
-model.features[-1].fc1 = nn.Linear(in_features=1280, out_features=1000, bias=True)
-model.features[-1].fc2 = nn.Linear(in_features=1000, out_features=573, bias=True)
-model.avgpool = nn.Identity()
-model.classifier[1] = nn.Linear(573, 2)
-model = model.to(device)
+    train_dataset = ImageDataset(X_train, y_train,train_ids, transform=train_transform)
+    test_dataset = ImageDataset(X_test, y_test,test_ids, transform=test_transform)
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        num_workers=4,
+        shuffle=True
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        num_workers=4,
+        shuffle=False
+    )
+    model = torchvision.models.efficientnet_b0()
+    # Initialize new output layer
+    model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+    model.features[-1].fc = nn.AdaptiveAvgPool2d(output_size=1)
+    model.features[-1].fc3 = nn.Flatten()
 
-# Setup the loss function
-criterion = nn.CrossEntropyLoss()
+    model.features[-1].fc1 = nn.Linear(in_features=1280, out_features=1000, bias=True)
+    model.features[-1].fc2 = nn.Linear(in_features=1000, out_features=573, bias=True)
+    model.avgpool = nn.Identity()
+    model.classifier[1] = nn.Linear(573, 2)
+    model = model.to(device)
 
-# Train model
-model , best_acc, best_epoch  = train_model(model, train_loader,test_loader, criterion, optimizer, device , num_epochs)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
-# take indices and compare , will do it in parallel and manually choose the 3 group IDs each time
-model(X_test)
+    criterion = nn.CrossEntropyLoss()
 
-print(f"lr = {lr}")
-print(f"num_epochs = {num_epochs}")
-print(f"batch_size = {batch_size}")
-print(f"img_size = {img_size}")
-print(f"segment_hours = {segment_hours}")
+    # Train model
+    model , best_acc, best_epoch  = train_model(model, train_loader,test_loader, criterion, optimizer, device , num_epochs)
 
-transform_str = "\n".join([str(t) for t in train_transform.transforms])
-print(transform_str)
+    print(f"lr = {lr}")
+    print(f"num_epochs = {num_epochs}")
+    print(f"batch_size = {batch_size}")
+    print(f"img_size = {img_size}")
+    print(f"segment_hours = {segment_hours}")
+
+    transform_str = "\n".join([str(t) for t in train_transform.transforms])
+    print(transform_str)
