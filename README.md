@@ -12,10 +12,10 @@ To analyze this data, we employ AI models, particularly focusing on RNNs with LS
 Sample plots can be found in the `./plots` directory.
 
 Example Plot 1 (Female Oyster - C2):
-![Female Oyster - C2](./datasets/plots/C2_F.png)
+![Female Oyster - C2](./datasets/plots/A_1_1.png)
 
 Example Plot 2 (Male Oyster - C3):
-![Male Oyster - C3](./datasets/plots/C3_M.png)
+![Male Oyster - C3](./datasets/plots/A_2_0.png)
 
 ## Setup and Usage
 
