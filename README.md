@@ -34,4 +34,4 @@ sbatch submit_venv.sh
 
 ### Results
 Training results and logs can be accessed in the `./logs` directory.
-Google Drive link: [new_google_drive_link](https://drive.google.com/drive/folders/1NHZq86wb4mbXwzRjb4mfaKLgCAriHsRj?usp=drive_link)
+[Drive link](https://drive.google.com/drive/folders/1NHZq86wb4mbXwzRjb4mfaKLgCAriHsRj?usp=drive_link)
