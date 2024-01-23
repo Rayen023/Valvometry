@@ -12,10 +12,10 @@ To analyze this data, we employ AI models, particularly focusing on RNNs with LS
 Sample plots can be found in the `./plots` directory.
 
 Example Plot 1 (Female Oyster - C2):
-![Female Oyster - C2](./datasets/plots/A_1_1.png)
+![Female Oyster - C2](./Plots/plots/A_1_1.png)
 
 Example Plot 2 (Male Oyster - C3):
-![Male Oyster - C3](./datasets/plots/A_2_0.png)
+![Male Oyster - C3](./Plots/plots/A_2_0.png)
 
 ## Setup and Usage
 
@@ -34,3 +34,5 @@ sbatch submit_venv.sh
 
 ### Results
 Training results and logs can be accessed in the `./logs` directory.
+Lien drive : https://drive.google.com/drive/folders/1NHZq86wb4mbXwzRjb4mfaKLgCAriHsRj?usp=drive_link
+Google Drive link: [new_google_drive_link](https://drive.google.com/drive/folders/1NHZq86wb4mbXwzRjb4mfaKLgCAriHsRj?usp=drive_link)
