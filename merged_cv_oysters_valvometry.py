@@ -22,24 +22,26 @@ gc.collect()
 print('Importing df')
 
 
-
-train_df = pd.read_csv("datasets/train_df2_after_norm_mem_reduce.csv")
-train_df = train_df[~train_df['ID'].isin(['A_1','B_3','B_4','E_4',])]
-
-#train_df = pd.read_csv("/lustre07/scratch/rayen/Oysters/datasets/train_df_nt_after_norm.csv")
-#train_df = train_df[~train_df['ID'].isin(['A1','A4','C4','D1','E3','F1','G1','G4',])]
+train_df = pd.read_csv("/lustre07/scratch/rayen/Oysters/datasets/train_df_nt_after_norm.csv")
+train_df = train_df[~train_df['ID'].isin(['A1','A4','C4','D1','E3','F1','G1','G4',])]
 
 print(train_df.head())
-continuous_features = 'Sequence'
-continuous_features = [col for col in train_df.columns if col.lower() == continuous_features.lower()]
+
+train_df = train_df[['ID','sequence','label']]
+train_df = train_df.rename(columns={'sequence': 'Sequence'})
+
+print(train_df.head())
+
+train_df2 = pd.read_csv("datasets/train_df2_after_norm_mem_reduce.csv")
+train_df2 = train_df2[~train_df2['ID'].isin(['A_1','B_3','B_4','E_4',])]
+print(train_df2.head())
+
 
 lr = 0.000508
-num_epochs = 200
+num_epochs = 150
 batch_size = 8
-img_size = 224 #276
+img_size = 276
 segment_hours = 8
-crop_size = 224 #144
-
 
 def reduce_mem_usage(props):
     start_mem_usg = props.memory_usage().sum() / 1024**2
@@ -108,6 +110,7 @@ def reduce_mem_usage(props):
     return props
 
 train_df = reduce_mem_usage(train_df)
+train_df2 = reduce_mem_usage(train_df2)
 
 gc.collect()
 
@@ -129,9 +132,9 @@ def segment_group(group, segments):
 import re
 def sequence_df(df, hours, continuous_features):
 
-    nseconds = train_df['ID'].value_counts().get('D3', 0) / 10
+    nseconds = df['ID'].value_counts().get('D3', 0) / 10
     if int(nseconds) == 0 :
-        nseconds = train_df['ID'].value_counts().get('D_3', 0) / 10
+        nseconds = df['ID'].value_counts().get('D_3', 0) / 10
     total_hours = nseconds / 3600
     total_days = total_hours / 24
     nbr_segments = int(total_hours / hours)
@@ -149,14 +152,17 @@ def sequence_df(df, hours, continuous_features):
     min_count = df.groupby("ID").size().min()
     print(f"Min_count {min_count} Duree de chaque sequence = {min_count/36000} heures")
 
+    # Group the DataFrame by 'ID' and extract the values for each group
     grouped = df.groupby('ID')
 
+    # Define a custom sorting function
     def natural_sort_key(s):
         return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
     sequences = []
     ids = []
 
+    # Iterate over the grouped data using the sorted group names
     for name in sorted(grouped.groups.keys(), key=natural_sort_key):
         group = grouped.get_group(name)
         current_sequence = group[continuous_features].values
@@ -175,9 +181,48 @@ def sequence_df(df, hours, continuous_features):
 
     return X.squeeze(),y.squeeze(), min_count, ids, nbr_segments
 
-X, y, min_count, ids, nbr_segments = sequence_df(train_df, segment_hours, continuous_features)
+X, y, min_count, ids, nbr_segments = sequence_df(train_df, segment_hours, 'Sequence')
+X2, y2, min_count2, ids2, nbr_segments2 = sequence_df(train_df2, segment_hours, 'Sequence')
+
+ids = np.concatenate((ids, ids2))
 
 print(f"input_size = {X.shape}, output_size = {y.shape}")
+print(f"input_size = {X2.shape}, output_size = {y2.shape}")
+
+
+min_count = min(min_count, min_count2)
+
+X, X2 = X[:, :min_count], X2[:, :min_count]
+
+# Assuming train_df and train_df2 are your dataframes
+IDs = train_df['ID'].unique()
+print("Length of IDs:", len(IDs))
+
+IDs2 = train_df2['ID'].unique()
+
+# Concatenate IDs and IDs2
+IDs = np.concatenate((IDs, IDs2))
+
+# Print the length of each array
+print("Length of IDs2:", len(IDs2))
+print("Length of concatenated IDs:", len(IDs))
+
+Y = y[::nbr_segments]
+Y2 = y2[::nbr_segments2]
+Y = np.concatenate((Y, Y2))
+
+print(len(Y))
+
+# Group IDs by label
+label_0_ids = [id for id, label in zip(IDs, Y) if label == 0]
+label_1_ids = [id for id, label in zip(IDs, Y) if label == 1]
+
+print(f'X1 shape : {X.shape}')
+print(f'X2 shape : {X2.shape}')
+X = np.concatenate((X, X2), axis=0)
+print(f'X final shape : {X.shape}')
+
+y = np.concatenate((y, y2), axis=0)
 
 def factors(n):
     result = []
@@ -215,14 +260,6 @@ class ImageDataset(Dataset):
         return image, label, id
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-IDs = train_df.ID.unique()
-Y = y[::nbr_segments]
-print(len(Y))
-
-# Group IDs by label
-label_0_ids = [id for id, label in zip(IDs, Y) if label == 0]
-label_1_ids = [id for id, label in zip(IDs, Y) if label == 1]
 
 import random
 
@@ -297,6 +334,7 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
         running_test_loss = 0.0
         running_test_corrects = 0
         
+        # Assuming you have a DataFrame to store the results
         columns = ['labels', 'segment_ids', 'ids', 'outputs','sigmoid_outputs', 'preds', 'pair_best_epoch', 'pair_best_acc']
         results_df = pd.DataFrame(columns=columns)
 
@@ -309,7 +347,6 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
                 
                 outputs = model(inputs)
                 outputs = outputs.squeeze()
-                print(f'outputs : {outputs} ')
                 labels = labels.float().view_as(outputs)
                 loss = criterion(outputs, labels.float())
                 
@@ -347,7 +384,7 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
                 best_results_df['pair_best_epoch'] = best_epoch
                 #print(best_results_df)
                 
-                # Save the model state dict 
+                # Save the model state dict if needed
                 # torch.save(model.state_dict(), os.path.join('/path/to/save/', '{0:0=2d}.pth'.format(epoch+1)))
 
     time_elapsed = time.time() - since
@@ -377,23 +414,30 @@ for group in pairs :
     print(f"X_train shape: {len(X_train)}, X_test shape: {len(X_test)}, y_train shape: {y_train.shape}, y_test shape: {y_test.shape}")
     X_train = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X_train]
     X_test = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X_test]
+    
+    folder_name = "saved_images"
+    os.makedirs(folder_name, exist_ok=True)
+
+    for idx, img in zip(train_ids, X_train):
+        img.resize((512, 512), Image.ANTIALIAS).save(os.path.join(folder_name, f"{idx}.png"))
+
+    for idx, img in zip(test_ids, X_test):
+        img.resize((512, 512), Image.ANTIALIAS).save(os.path.join(folder_name, f"{idx}.png"))
+
 
     train_transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
-        #transforms.RandomCrop((crop_size, crop_size)),
+        transforms.RandomCrop((144, 144)),
         transforms.ToTensor(),
     ])
 
     test_transform = transforms.Compose([
         transforms.Resize((img_size,img_size)),
-        #transforms.RandomCrop((crop_size, crop_size)), 
+        transforms.RandomCrop((144, 144)), #TODO
         transforms.ToTensor(),
     ])
-    
-    original_train_dataset = ImageDataset(X_train, y_train,train_ids, transform=test_transform)
+
     train_dataset = ImageDataset(X_train, y_train,train_ids, transform=train_transform)
-    
-    train_dataset = torch.utils.data.ConcatDataset([train_dataset, original_train_dataset])
     test_dataset = ImageDataset(X_test, y_test,test_ids, transform=test_transform)
 
     train_loader = torch.utils.data.DataLoader(
@@ -414,11 +458,10 @@ for group in pairs :
     model.features[-1].fc = nn.AdaptiveAvgPool2d(output_size=1)
     model.features[-1].fc3 = nn.Flatten()
 
-    model.features[-1].fc1 = nn.Linear(in_features=1280, out_features=1000, bias=True) # 1408 b_2 -> 1280 b_0 , 1792 b_4 (48 not 32 in layer 0)
+    model.features[-1].fc1 = nn.Linear(in_features=1280, out_features=1000, bias=True)
     model.features[-1].fc2 = nn.Linear(in_features=1000, out_features=573, bias=True)
     model.avgpool = nn.Identity()
     model.classifier[1] = nn.Linear(573, 1)
-        
     model = model.to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -441,7 +484,12 @@ print(transform_str)
 correct_predictions_df = all_results_df[all_results_df['labels'] == all_results_df['preds']]
 
 correct_predictions_count_by_segment = correct_predictions_df.groupby('segment_ids').size().reset_index(name='correct_segments_count')
-correct_predictions_count_by_segment['ID_acc'] = correct_predictions_count_by_segment['correct_segments_count'] / nbr_segments
+
+segment_lengths = all_results_df.groupby('segment_ids').size().reset_index(name='segment_length')
+correct_predictions_count_by_segment = pd.merge(correct_predictions_count_by_segment, segment_lengths, on='segment_ids', how='left')
+
+correct_predictions_count_by_segment['ID_acc'] = correct_predictions_count_by_segment['correct_segments_count'] / correct_predictions_count_by_segment['segment_length']
+
 
 numeric_columns = ['labels', 'outputs', 'sigmoid_outputs', 'preds', 'pair_best_epoch', 'pair_best_acc']
 all_results_df[numeric_columns] = all_results_df[numeric_columns].apply(pd.to_numeric, errors='coerce')
@@ -463,7 +511,7 @@ merged_df = pd.merge(grouped_results, correct_predictions_count_by_segment, on='
 print(all_results_df)
 print(merged_df)
 
-folder_name = f"swin_s_lr_{lr}_epochs_{num_epochs}_batch_{batch_size}_img_{img_size}_segments_{segment_hours}h"
+folder_name = f"1_lr_{lr}_epochs_{num_epochs}_batch_{batch_size}_img_{img_size}_segments_{segment_hours}h"
 
 if os.path.exists(folder_name):
     folder_name += "1"

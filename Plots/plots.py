@@ -9,7 +9,11 @@ mpl.rcParams['agg.path.chunksize'] = 10000
 print('Importing df')
 
 # Read the CSV file
-df = pd.read_csv('/gpfs/scratch/rayen/Oysters/datasets/train_df2_after_norm_mem_reduce.csv')
+#df = pd.read_csv('/gpfs/scratch/rayen/Oysters/datasets/train_df2_after_norm_mem_reduce.csv')
+df = pd.read_csv("/lustre07/scratch/rayen/Oysters/datasets/train_df_nt_after_norm.csv")
+
+continuous_features = 'Sequence'
+continuous_features = [col for col in df.columns if col.lower() == continuous_features.lower()]
 
 grouped = df.groupby('ID')
 
@@ -31,7 +35,7 @@ for name, group in grouped:
     print(f'name: {name}, group: {group}')
 
     plt.figure(figsize=(100, 30))
-    plt.plot(group.index, group['Sequence'])  # Plot the smoothed sequence
+    plt.plot(group.index, group[continuous_features])  # Plot the smoothed sequence
     plt.xlabel('Index', fontsize=35)  # Adjust the fontsize for x-axis label
     plt.ylabel('Sequence', fontsize=35)  # Adjust the fontsize for y-axis label
     plt.title(f'Sequence for {name}', fontsize=35)  # Adjust the fontsize for title
@@ -44,25 +48,3 @@ for name, group in grouped:
 
 print(f"Plots saved in the '{dir_name}' folder.")
 
-
-"""# Separate the data into label 1 and label 0
-label_1_data = df[df['label'] == 1]
-label_0_data = df[df['label'] == 0]
-
-# Plot and save both label 1 and label 0 sequences on the same plot, starting from x = 0
-plt.figure(figsize=(8, 6))
-plt.plot(range(len(label_1_data)), label_1_data['Sequence'], label='Label 1', color='blue')
-plt.plot(range(len(label_0_data)), label_0_data['Sequence'], label='Label 0', color='red')
-plt.xlabel('Index')
-plt.ylabel('Sequence')
-plt.legend()
-plt.title('Sequences with Labels 1 and 0')
-
-# Save the plot
-file_name = 'plots/all_sequences0.png'
-plt.savefig(file_name)
-plt.close()
-
-
-print(f"Plot saved as '{file_name}' in the 'plots' folder.")
-"""
