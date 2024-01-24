@@ -300,7 +300,7 @@ def objective(trial):
         "flip_percent" : trial.suggest_float("flip_percent", 0.001, 0.2),
     }
 
-    model = torchvision.models.efficientnet_b1()
+    model = torchvision.models.efficientnet_b0()
 
     model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
     model.features[-1].fc = nn.AdaptiveAvgPool2d(output_size=1)
