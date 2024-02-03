@@ -1,6 +1,3 @@
-print('import packages')
-
-import os
 import gc
 import time
 import numpy as np
@@ -8,45 +5,46 @@ import pandas as pd
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
-
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
-
 import torchvision
 from torchvision import transforms
 from PIL import Image
-import joblib
+import re
+import random
+import os
+import optuna
+from datetime import datetime
+timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M')
+save_directory = 'best_{0}'.format(timestamp)
+os.makedirs(save_directory, exist_ok=True)
 
 gc.collect()
-
-print('Importing df')
-
 
 
 train_df = pd.read_csv("datasets/train_df2_after_norm_mem_reduce.csv")
 train_df = train_df[~train_df['ID'].isin(['A_1','B_3','B_4','E_4',])]
 
-#train_df[train_df['ID'] == 'B_2']['label'] = 1
-#train_df = train_df[~train_df['ID'].isin(['A_1','B_4','E_4','E_2'])]
+#test_df = train_df.copy()
 
+test_df = pd.read_csv("datasets/train_df_nt_after_norm_mem_reduce.csv")
+test_df = test_df[~test_df['ID'].isin(['A1','A4','C4','D1','E3','F1','G1','G4',])]
 
-#train_df = pd.read_csv("/lustre07/scratch/rayen/Oysters/datasets/train_df_nt_after_norm.csv")
-#train_df = train_df[~train_df['ID'].isin(['A1','A4','C4','D1','E3','F1','G1','G4',])]
 
 print(train_df.head())
+print(test_df.head())
+
 continuous_features = 'Sequence'
-continuous_features = [col for col in train_df.columns if col.lower() == continuous_features.lower()]
+train_continuous_features = [col for col in train_df.columns if col.lower() == continuous_features.lower()]
+test_continuous_features = [col for col in test_df.columns if col.lower() == continuous_features.lower()]
 
 lr = 0.000508
 num_epochs = 100
 batch_size = 8
 img_size = 276
-#img_size = 514
-#img_sizeh = 563
 segment_hours = 8
 crop_size = 144
-#crop_size = 276
 
 def reduce_mem_usage(props):
     start_mem_usg = props.memory_usage().sum() / 1024**2
@@ -115,6 +113,7 @@ def reduce_mem_usage(props):
     return props
 
 train_df = reduce_mem_usage(train_df)
+test_df = reduce_mem_usage(test_df)
 
 gc.collect()
 
@@ -133,12 +132,11 @@ def segment_group(group, segments):
 
     return pd.concat(segmented_dfs)
 
-import re
 def sequence_df(df, hours, continuous_features):
 
-    nseconds = train_df['ID'].value_counts().get('D3', 0) / 10
+    nseconds = df['ID'].value_counts().get('D3', 0) / 10
     if int(nseconds) == 0 :
-        nseconds = train_df['ID'].value_counts().get('D_3', 0) / 10
+        nseconds = df['ID'].value_counts().get('D_3', 0) / 10
     total_hours = nseconds / 3600
     total_days = total_hours / 24
     nbr_segments = int(total_hours / hours)
@@ -182,9 +180,21 @@ def sequence_df(df, hours, continuous_features):
 
     return X.squeeze(),y.squeeze(), min_count, ids, nbr_segments
 
-X, y, min_count, ids, nbr_segments = sequence_df(train_df, segment_hours, continuous_features)
+X, y, min_count, train_ids, nbr_segments = sequence_df(train_df, segment_hours, train_continuous_features)
+X_test, y_test, test_min_count, test_ids, test_nbr_segments = sequence_df(test_df, segment_hours, test_continuous_features)
+
+min_count = min(min_count, test_min_count)
 
 print(f"input_size = {X.shape}, output_size = {y.shape}")
+print(f"input_size = {X_test.shape}, output_size = {y_test.shape}")
+
+X = X[:,:min_count]
+X_test = X_test[:,:min_count]
+
+print(f"input_size = {X.shape}, output_size = {y.shape}")
+print(f"input_size = {X_test.shape}, output_size = {y_test.shape}")
+
+print(len(test_ids))
 
 def factors(n):
     result = []
@@ -194,11 +204,11 @@ def factors(n):
             result.append(n // i)
     return sorted(result)
 
-factors_min_count = factors(min_count)  
+factors_min_count = factors(min_count)
 middle_values = factors_min_count[len(factors_min_count) // 2 - 1:len(factors_min_count) // 2 + 1]  # Get the two middle values
-
 print(factors_min_count)
-print("Middle Values:", middle_values)  
+print("Middle Values:", middle_values)
+
 class ImageDataset(Dataset):
     def __init__(self, images_series, labels, ids, transform=None):
         self.images_series = images_series
@@ -216,41 +226,18 @@ class ImageDataset(Dataset):
             image = self.transform(image)
 
         label = self.labels[idx]
+
         id = self.ids[idx]
 
         return image, label, id
 
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-IDs = train_df.ID.unique()
 Y = y[::nbr_segments]
-print(len(Y))
+train_ids = np.array(train_ids)
 
-# Group IDs by label
-label_0_ids = [id for id, label in zip(IDs, Y) if label == 0]
-label_1_ids = [id for id, label in zip(IDs, Y) if label == 1]
-
-import random
-
-def random_pairs(ids_0, ids_1):
-    pairs = []
-    min_len = min(len(ids_0), len(ids_1))
-    
-    for _ in range(min_len):
-        id_0 = random.choice(ids_0)
-        id_1 = random.choice(ids_1)
-        
-        pair = [id_0, id_1]
-        pairs.append(pair)
-        
-        ids_0.remove(id_0)
-        ids_1.remove(id_1)
-    
-    return pairs
-
-pairs = random_pairs(label_0_ids, label_1_ids)
-print("Random pairs:", pairs)
+Y_test = y_test[::test_nbr_segments]
+test_ids = np.array(test_ids)
 
 def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, device, num_epochs):
     since = time.time()
@@ -273,8 +260,6 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
         running_train_corrects = 0
 
         for inputs, labels, _ in train_dataloader:
-            print(inputs.shape)
-
             inputs = inputs.to(device)
             labels = labels.to(device)
 
@@ -305,29 +290,30 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
         model.eval()
         running_test_loss = 0.0
         running_test_corrects = 0
-        
+
         columns = ['labels', 'segment_ids', 'ids', 'outputs','sigmoid_outputs', 'preds', 'pair_best_epoch', 'pair_best_acc']
         results_df = pd.DataFrame(columns=columns)
 
         with torch.no_grad():
             for inputs, labels, ids in test_dataloader:
+                print(inputs.shape)
+                print(inputs)
                 inputs = inputs.to(device)
                 labels = labels.to(device)
-                #print(labels)
-                #print(f' test_ids : {ids}')
-                
+
                 outputs = model(inputs)
                 outputs = outputs.squeeze()
-                
+
                 labels = labels.float().view_as(outputs)
                 loss = criterion(outputs, labels.float())
-                
+
                 preds = (torch.sigmoid(outputs) > 0.5).float()
+                #print(preds)
                 #print('preds', preds)
 
                 running_test_loss += loss.item() * inputs.size(0)
                 running_test_corrects += torch.sum(preds == labels.data)
-                
+
                 batch_results = pd.DataFrame({
                     'labels': labels.cpu().numpy(),
                     'segment_ids' : [segment_id[:3] for segment_id in ids],
@@ -355,9 +341,8 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
                 best_results_df['pair_best_acc'] = best_acc
                 best_results_df['pair_best_epoch'] = best_epoch
                 #print(best_results_df)
-                
-                # Save the model state dict 
-                # torch.save(model.state_dict(), os.path.join('/path/to/save/', '{0:0=2d}.pth'.format(epoch+1)))
+
+                torch.save(model.state_dict(), os.path.join(save_directory, '{:02d}.pth'.format(epoch + 1)))
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
@@ -365,68 +350,59 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
 
     return model, best_acc, best_epoch, best_results_df
 
-
 columns = ['labels','segment_ids', 'ids', 'outputs','sigmoid_outputs', 'preds', 'pair_best_epoch', 'pair_best_acc']
 all_results_df = pd.DataFrame(columns=columns)
 
-for group in pairs : 
-    id_indices = []
-    for ID in group : 
-        id_indices.extend([i for i, val in enumerate(ids) if val.startswith(ID)])
-    
-    complement_indices = np.setdiff1d(np.arange(len(ids)), id_indices)
+X_train = X
+y_train = y
 
-    print(f"Current test IDs : {group}")
-    
-    ids = np.array(ids)
-    X_train, X_test, y_train, y_test = X[complement_indices], X[id_indices], y[complement_indices], y[id_indices]
-    train_ids, test_ids = ids[complement_indices] , ids[id_indices]
-    
-    import matplotlib.image
-    folder_name = "saved_images"
-    from skimage.transform import resize
-    os.makedirs(folder_name, exist_ok=True)
-    
-    Seq_images = [seq.reshape(*middle_values) for seq in X_train]
-    Seq_images = [resize(seq, (512, 512), anti_aliasing=False, preserve_range=True) for seq in X_train]
-    
-    for idx, img in zip(train_ids, Seq_images):
-        matplotlib.image.imsave(os.path.join(folder_name, f'{idx}.png'), img, cmap='gray')
-    
-    
-    print(f"X_train shape: {len(X_train)}, X_test shape: {len(X_test)}, y_train shape: {y_train.shape}, y_test shape: {y_test.shape}")
-    
-    Train_images = [resize(seq, (514, 563), anti_aliasing=False, preserve_range=True) for seq in X_train]
-    Test_images = [resize(seq, (514, 563), anti_aliasing=False, preserve_range=True) for seq in X_test]
-    
-    
-    train_transform = transforms.Compose([
-        transforms.ToTensor(),
-        #transforms.Resize((img_size, img_size)),
-        #transforms.RandomCrop((crop_size, crop_size)),
-    ])
-    
+Train_images = [seq.reshape(*middle_values) for seq in X_train]
+Test_images = [seq.reshape(*middle_values) for seq in X_test]
 
-    test_transform = transforms.Compose([
-        transforms.ToTensor(),
-        #transforms.Resize((img_size, img_size)),
-        #transforms.RandomCrop((crop_size, crop_size)), 
-    ])
-    
-    transform_str = "\n".join([str(t) for t in train_transform.transforms])
-    print(transform_str)
-    
-    print(f"lr = {lr}")
-    print(f"num_epochs = {num_epochs}")
-    print(f"batch_size = {batch_size}")
-    print(f"img_size = {img_size}")
-    print(f"segment_hours = {segment_hours}")
-    if crop_size:
-        print(f"crop_size = {crop_size}")
+print(f"X_train shape: {len(X_train)}, X_test shape: {len(X_test)}, y_train shape: {y_train.shape}, y_test shape: {y_test.shape}")
 
+train_transform = transforms.Compose([
+    #transforms.Resize((img_size, img_size)),
+    #transforms.RandomCrop((crop_size, crop_size)),
+    transforms.ToTensor(),
+])
+
+test_transform = transforms.Compose([
+    #transforms.Resize((img_size, img_size)),
+    #transforms.RandomCrop((crop_size, crop_size)),
+    transforms.ToTensor(),
+])
+
+transform_str = "\n".join([str(t) for t in train_transform.transforms])
+print(transform_str)
+
+print(f"lr = {lr}")
+print(f"num_epochs = {num_epochs}")
+print(f"batch_size = {batch_size}")
+print(f"img_size = {img_size}")
+print(f"segment_hours = {segment_hours}")
+if crop_size:
+    print(f"crop_size = {crop_size}")
+
+
+#original_train_dataset = ImageDataset(X_train, y_train,train_ids, transform=test_transform)
+train_dataset = ImageDataset(Train_images, y_train,train_ids, transform=train_transform)
+
+#train_dataset = torch.utils.data.ConcatDataset([train_dataset, original_train_dataset])
+test_dataset = ImageDataset(Test_images, y_test,test_ids, transform=test_transform)
+
+def objective(trial):
     
-    train_dataset = ImageDataset(Train_images, y_train,train_ids, transform=train_transform)
-    test_dataset = ImageDataset(Test_images, y_test,test_ids, transform=test_transform)
+    param = {
+        "batch_size": trial.suggest_int("batch_size", 8, 16),  # Adjusted batch size interval
+        "lr": trial.suggest_float("lr", 0.0001, 0.001),  # Adjusted learning rate interval
+        "epochs": trial.suggest_int("epochs", 60, 250),  # Adjusted number of epochs interval
+    }
+
+
+    batch_size = param['batch_size']
+    lr = param['lr']
+    num_epochs = param['epochs']
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
@@ -440,7 +416,7 @@ for group in pairs :
         num_workers=4,
         shuffle=False
     )
-    """model = torchvision.models.efficientnet_b0()
+    model = torchvision.models.efficientnet_b0()
     # Initialize new output layer
     model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
     model.features[-1].fc = nn.AdaptiveAvgPool2d(output_size=1)
@@ -449,58 +425,8 @@ for group in pairs :
     model.features[-1].fc1 = nn.Linear(in_features=1280, out_features=1000, bias=True) # 1408 b_2 -> 1280 b_0 , 1792 b_4 (48 not 32 in layer 0)
     model.features[-1].fc2 = nn.Linear(in_features=1000, out_features=573, bias=True)
     model.avgpool = nn.Identity()
-    model.classifier[1] = nn.Linear(573, 1)"""
-    
-    import torch
-    import torch.nn as nn
+    model.classifier[1] = nn.Linear(573, 1)
 
-    class SmallCNN(nn.Module):
-        def __init__(self):
-            super(SmallCNN, self).__init__()
-
-            self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
-            self.relu1 = nn.ReLU()
-            self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-
-            self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-            self.relu2 = nn.ReLU()
-            self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
-
-            self.flatten = nn.Flatten()
-
-            self.fc1 = nn.Linear(1146880 , 128)
-            self.relu3 = nn.ReLU()
-
-            self.fc2 = nn.Linear(128, 1)
-
-        def forward(self, x):
-            x = self.conv1(x)
-            x = self.relu1(x)
-            x = self.pool1(x)
-
-            x = self.conv2(x)
-            x = self.relu2(x)
-            x = self.pool2(x)
-
-            x = self.flatten(x)
-
-            x = self.fc1(x)
-            x = self.relu3(x)
-
-            x = self.fc2(x)
-
-            return x
-
-    # Instantiate the small model
-    model = SmallCNN()
-
-    
-    """model = torchvision.models.resnet50()
-    model.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(1, 1), bias=False)
-    model.fc = nn.Linear(in_features=2048, out_features=1, bias=True)
-    #model.fc.fc1 = nn.Linear(in_features=512, out_features=1, bias=True)"""
-    
-        
     model = model.to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -509,48 +435,44 @@ for group in pairs :
 
     # Train model
     model , best_acc, best_epoch, best_results_df = train_model(model, train_loader,test_loader, criterion, optimizer, device , num_epochs)
-    all_results_df = pd.concat([all_results_df, best_results_df], ignore_index=True)
     
+    
+    return best_acc
 
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=100)
 
+print('Number of finished trials:', len(study.trials), study.best_trial.values)
+print('Best trial:', study.best_trial.params)
+
+all_results_df = pd.concat([all_results_df, all_results_df], ignore_index=True)
 correct_predictions_df = all_results_df[all_results_df['labels'] == all_results_df['preds']]
-
 correct_predictions_count_by_segment = correct_predictions_df.groupby('segment_ids').size().reset_index(name='correct_segments_count')
-correct_predictions_count_by_segment['ID_acc'] = correct_predictions_count_by_segment['correct_segments_count'] / nbr_segments
-
+correct_predictions_count_by_segment['ID_acc'] = correct_predictions_count_by_segment['correct_segments_count'] / test_nbr_segments
 numeric_columns = ['labels', 'outputs', 'sigmoid_outputs', 'preds', 'pair_best_epoch', 'pair_best_acc']
 all_results_df[numeric_columns] = all_results_df[numeric_columns].apply(pd.to_numeric, errors='coerce')
-
 all_results_df['segment_ids'] = pd.Categorical(all_results_df['segment_ids'],
                                                categories=all_results_df['segment_ids'].unique(),
                                                ordered=True)
-
 grouped_results = all_results_df.groupby('segment_ids').agg({
     'labels': 'mean', 'outputs': 'mean', 'sigmoid_outputs': ['mean', 'std'],
     'preds': ['mean', 'std'], 'pair_best_epoch': 'mean', 'pair_best_acc': 'mean'
 }).reset_index()
-
 grouped_results.columns = ['segment_ids', 'labels_mean', 'outputs_mean', 'sigmoid_outputs_mean',
                             'sigmoid_outputs_std', 'preds_mean', 'preds_std', 'pair_best_epoch_mean', 'pair_best_acc_mean']
-
 merged_df = pd.merge(grouped_results, correct_predictions_count_by_segment, on='segment_ids', how='left')
-
 print(all_results_df)
 print(merged_df)
-
 if crop_size :
     folder_name_base = f"efficientnet_b0_lr_{lr}_epochs_{num_epochs}_batch_{batch_size}_img_{img_size}_crop_{crop_size}_segments_{segment_hours}h"
-else : 
+else :
     folder_name_base = f"efficientnet_b0_lr_{lr}_epochs_{num_epochs}_batch_{batch_size}_img_{img_size}_segments_{segment_hours}h"
-
 folder_name = folder_name_base
 counter = 1
-
 while os.path.exists(folder_name):
     folder_name = f"{folder_name_base}{counter}"
     counter += 1
-
 os.makedirs(folder_name, exist_ok=True)
-
 merged_df.to_csv(os.path.join(folder_name, 'merged_df.csv'), index=False)
 all_results_df.to_csv(os.path.join(folder_name, 'all_results_df.csv'), index=False)
+

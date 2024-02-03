@@ -23,6 +23,10 @@ print('Importing df')
 
 import optuna
 
+global ids
+
+import warnings
+warnings.filterwarnings('ignore')
 
 train_df = pd.read_csv("datasets/train_df2_after_norm_mem_reduce.csv")
 train_df = train_df[~train_df['ID'].isin(['A_1','B_3','B_4','E_4',])]
@@ -34,7 +38,7 @@ print(train_df.head())
 continuous_features = 'Sequence'
 continuous_features = [col for col in train_df.columns if col.lower() == continuous_features.lower()]
 
-img_size = 224 #276
+img_size = 276
 segment_hours = 8
 
 
@@ -298,11 +302,11 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
         results_df = pd.DataFrame(columns=columns)
 
         with torch.no_grad():
-            for inputs, labels, ids in test_dataloader:
+            for inputs, labels, test_ids in test_dataloader:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
                 #print(labels)
-                #print(f' test_ids : {ids}')
+                #print(f' test_ids : {test_ids}')
                 
                 outputs = model(inputs)
                 outputs = outputs.squeeze()
@@ -318,8 +322,8 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
                 
                 batch_results = pd.DataFrame({
                     'labels': labels.cpu().numpy(),
-                    'segment_ids' : [segment_id[:3] for segment_id in ids],
-                    'ids': ids,
+                    'segment_ids' : [segment_id[:3] for segment_id in test_ids],
+                    'ids': test_ids,
                     'outputs': outputs.cpu().numpy(),
                     'sigmoid_outputs': torch.sigmoid(outputs).cpu().numpy(),
                     'preds': preds.cpu().numpy(),
@@ -353,21 +357,20 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
 
     return model, best_acc, best_epoch, best_results_df
 
+from functools import partial
 
-def objective(trial):
+def objective(trial, ids):
     
     param = {
         "batch_size": trial.suggest_int("batch_size", 8, 16),  # Adjusted batch size interval
         "lr": trial.suggest_float("lr", 0.0001, 0.0005),  # Adjusted learning rate interval
         "epochs": trial.suggest_int("epochs", 200, 400),  # Adjusted number of epochs interval
-        "crop_size": trial.suggest_int("crop_size", 100, 200),  # Adjusted crop size interval
     }
 
 
     batch_size = param['batch_size']
     lr = param['lr']
     num_epochs = param['epochs']
-    crop_size = param['crop_size']
 
     columns = ['labels','segment_ids', 'ids', 'outputs','sigmoid_outputs', 'preds', 'pair_best_epoch', 'pair_best_acc']
     all_results_df = pd.DataFrame(columns=columns)
@@ -390,11 +393,20 @@ def objective(trial):
         X_train = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X_train]
         X_test = [Image.fromarray(seq.reshape(*middle_values), 'L') for seq in X_test]
 
+        """train_transform = transforms.Compose([
+            transforms.Resize((img_size+crop_size, img_size+crop_size)),
+            transforms.RandomCrop((img_size, img_size)),
+            transforms.ToTensor(),
+        ])"""
+        
         train_transform = transforms.Compose([
             transforms.Resize((img_size, img_size)),
-            transforms.RandomCrop((crop_size, crop_size)),
+            transforms.RandomHorizontalFlip(),  # Randomly flip the image horizontally
+            transforms.RandomVerticalFlip(),    # Randomly flip the image vertically
             transforms.ToTensor(),
         ])
+
+
 
         test_transform = transforms.Compose([
             transforms.Resize((img_size,img_size)),
@@ -410,13 +422,13 @@ def objective(trial):
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=batch_size,
-            num_workers=4,
+            num_workers=16,
             shuffle=True
         )
         test_loader = torch.utils.data.DataLoader(
             test_dataset,
             batch_size=batch_size,
-            num_workers=4,
+            num_workers=16,
             shuffle=False
         )
         model = torchvision.models.efficientnet_b0()
@@ -488,7 +500,9 @@ def objective(trial):
     
     return acc 
 
+objective_with_id = partial(objective, ids=ids)
+
 study = optuna.create_study(direction='maximize')
-study.optimize(objective, n_trials=10)
+study.optimize(objective_with_id, n_trials=10)
 print('Number of finished trials:', len(study.trials))
 print('Best trial:', study.best_trial.params)

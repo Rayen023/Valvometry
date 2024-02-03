@@ -41,10 +41,10 @@ continuous_features = [col for col in train_df.columns if col.lower() == continu
 lr = 0.000508
 num_epochs = 100
 batch_size = 8
-img_size = 276
-#img_size = 514
-#img_sizeh = 563
-segment_hours = 8
+#img_size = 276
+img_size = 514
+img_sizeh = 563
+segment_hours = 1
 crop_size = 144
 #crop_size = 276
 
@@ -216,10 +216,10 @@ class ImageDataset(Dataset):
             image = self.transform(image)
 
         label = self.labels[idx]
+
         id = self.ids[idx]
 
         return image, label, id
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -273,8 +273,6 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
         running_train_corrects = 0
 
         for inputs, labels, _ in train_dataloader:
-            print(inputs.shape)
-
             inputs = inputs.to(device)
             labels = labels.to(device)
 
@@ -348,7 +346,7 @@ def train_model(model, train_dataloader, test_dataloader, criterion, optimizer, 
             test_losses.append(test_loss)
             test_accuracies.append(test_acc.item())
 
-            if test_acc > best_acc and epoch > 50:
+            if test_acc > best_acc:
                 best_acc = test_acc.item()
                 best_epoch = epoch
                 best_results_df = results_df.copy()
@@ -381,36 +379,80 @@ for group in pairs :
     ids = np.array(ids)
     X_train, X_test, y_train, y_test = X[complement_indices], X[id_indices], y[complement_indices], y[id_indices]
     train_ids, test_ids = ids[complement_indices] , ids[id_indices]
-    
-    import matplotlib.image
-    folder_name = "saved_images"
-    from skimage.transform import resize
-    os.makedirs(folder_name, exist_ok=True)
-    
-    Seq_images = [seq.reshape(*middle_values) for seq in X_train]
-    Seq_images = [resize(seq, (512, 512), anti_aliasing=False, preserve_range=True) for seq in X_train]
-    
-    for idx, img in zip(train_ids, Seq_images):
-        matplotlib.image.imsave(os.path.join(folder_name, f'{idx}.png'), img, cmap='gray')
-    
-    
+            
     print(f"X_train shape: {len(X_train)}, X_test shape: {len(X_test)}, y_train shape: {y_train.shape}, y_test shape: {y_test.shape}")
     
-    Train_images = [resize(seq, (514, 563), anti_aliasing=False, preserve_range=True) for seq in X_train]
-    Test_images = [resize(seq, (514, 563), anti_aliasing=False, preserve_range=True) for seq in X_test]
+    Train_images = [seq.reshape(*middle_values) for seq in X_train]
+    Test_images = [seq.reshape(*middle_values) for seq in X_test]
+    
+    from pyts.datasets import load_gunpoint
+    from pyts.image import RecurrencePlot
+    import matplotlib.image
+    transformer = RecurrencePlot()
+    # Create a directory to store the results
+    output_directory = 'recurrence_plot_results_aliasing_false'
+    os.makedirs(output_directory, exist_ok=True)
     
     
+    # Process each sequence and save the result to a file
+    """for idx, seq in zip(train_ids, X_train):
+        # Transform the sequence
+        img = transformer.transform(seq.reshape(1, -1)) 
+        img = img.squeeze()
+        
+        matplotlib.image.imsave(os.path.join(output_directory, f'{idx}.png'), img, cmap='gray')
+        # Print progress (optional)
+        print(f"Processed sequence {idx}")"""
+
+
+    from skimage.transform import resize
+    import matplotlib.pyplot as plt
+
+    for idx, seq in zip(train_ids, X_train):
+        # Transform the sequence
+        img = transformer.transform(seq.reshape(1, -1)) 
+        img = img.squeeze()
+
+        # Resize the image to 512x512 using scikit-image
+        resized_img = resize(img, (512, 512), anti_aliasing=False, preserve_range=True)
+
+        # Save the resized image
+        matplotlib.image.imsave(os.path.join(output_directory, f'{idx}.png'), resized_img, cmap='gray')
+
+        # Print progress (optional)
+        print(f"Processed sequence {idx}")
+
+
+    """import os
+    import numpy as np
+    from scipy.spatial.distance import pdist, squareform
+    import matplotlib.pyplot as plt
+
+    def rec_plot(s, eps=0.1, steps=10):
+        d = pdist(s[:, None])
+        d = np.floor(d / eps)
+        d[d > steps] = steps
+        Z = squareform(d)
+        return Z
+
+    folder_name = "saved_images_rec2"
+    os.makedirs(folder_name, exist_ok=True)
+
+    for idx, seq in zip(train_ids, X_train):
+        Z = rec_plot(seq)
+        plt.imsave(os.path.join(folder_name, f"{idx}.png"), Z, cmap='gray')"""
+
     train_transform = transforms.Compose([
-        transforms.ToTensor(),
-        #transforms.Resize((img_size, img_size)),
+        #transforms.Resize((img_size, img_sizeh)),
         #transforms.RandomCrop((crop_size, crop_size)),
+        transforms.ToTensor(),
     ])
     
 
     test_transform = transforms.Compose([
-        transforms.ToTensor(),
         #transforms.Resize((img_size, img_size)),
         #transforms.RandomCrop((crop_size, crop_size)), 
+        transforms.ToTensor(),
     ])
     
     transform_str = "\n".join([str(t) for t in train_transform.transforms])
@@ -440,7 +482,7 @@ for group in pairs :
         num_workers=4,
         shuffle=False
     )
-    """model = torchvision.models.efficientnet_b0()
+    model = torchvision.models.efficientnet_b0()
     # Initialize new output layer
     model.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
     model.features[-1].fc = nn.AdaptiveAvgPool2d(output_size=1)
@@ -449,51 +491,7 @@ for group in pairs :
     model.features[-1].fc1 = nn.Linear(in_features=1280, out_features=1000, bias=True) # 1408 b_2 -> 1280 b_0 , 1792 b_4 (48 not 32 in layer 0)
     model.features[-1].fc2 = nn.Linear(in_features=1000, out_features=573, bias=True)
     model.avgpool = nn.Identity()
-    model.classifier[1] = nn.Linear(573, 1)"""
-    
-    import torch
-    import torch.nn as nn
-
-    class SmallCNN(nn.Module):
-        def __init__(self):
-            super(SmallCNN, self).__init__()
-
-            self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
-            self.relu1 = nn.ReLU()
-            self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-
-            self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-            self.relu2 = nn.ReLU()
-            self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
-
-            self.flatten = nn.Flatten()
-
-            self.fc1 = nn.Linear(1146880 , 128)
-            self.relu3 = nn.ReLU()
-
-            self.fc2 = nn.Linear(128, 1)
-
-        def forward(self, x):
-            x = self.conv1(x)
-            x = self.relu1(x)
-            x = self.pool1(x)
-
-            x = self.conv2(x)
-            x = self.relu2(x)
-            x = self.pool2(x)
-
-            x = self.flatten(x)
-
-            x = self.fc1(x)
-            x = self.relu3(x)
-
-            x = self.fc2(x)
-
-            return x
-
-    # Instantiate the small model
-    model = SmallCNN()
-
+    model.classifier[1] = nn.Linear(573, 1)
     
     """model = torchvision.models.resnet50()
     model.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(1, 1), bias=False)

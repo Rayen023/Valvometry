@@ -72,7 +72,7 @@ def reduce_mem_usage(props):
     return props
 
 # Get genders dict
-gender_csv = pd.read_excel("Original_Datasets/Individual sex_Microclosure counts_time closed.xlsx", header = 1)
+gender_csv = pd.read_excel("/gpfs/scratch/rayen/Oysters/datasets/Original_Datasets/Individual sex_Microclosure counts_time closed.xlsx", header = 1)
 gender_dict = dict(zip(gender_csv.ID , gender_csv["Sex (histology)"] ))
 gender_dict
 
@@ -81,7 +81,7 @@ module = ['A', 'C', 'D', 'E', 'F', 'G','H','I']
 temp_dfs = []
 
 for letter in tqdm.tqdm(module):
-    raw_data_files = sorted(glob.glob(f"Original_Datasets/Raw valvo data files_2019-2020_Second experiment (Jeff)/{letter}*.csv"))
+    raw_data_files = sorted(glob.glob(f"/gpfs/scratch/rayen/Oysters/datasets/Original_Datasets/Raw valvo data files_2019-2020_Second experiment (Jeff)/{letter}*.csv"))
     df = pd.concat([pd.read_csv(raw_data_files[0], header=16, index_col=0), pd.read_csv(raw_data_files[1], header=16, index_col=0)]).reset_index(drop=True)
     df = reduce_mem_usage(df)
     length = df.shape[0]

@@ -1,4 +1,6 @@
 ENV/
+recurrence*/
+saved_images*/
 *.csv
 *.xlsx
 *.log
@@ -6,3 +8,4 @@ ENV/
 *.t
 *.pt
 *.parquet
+*.pth
