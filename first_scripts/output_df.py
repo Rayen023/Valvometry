@@ -2,29 +2,31 @@ import pandas as pd
 import os
 import glob
 
+
 # Define a function to extract information from each file
 def extract_info_from_file(file_path):
     info = {}
-    with open(file_path, 'r') as file:
+    with open(file_path, "r") as file:
         lines = file.readlines()
         for line in lines:
             if line.startswith("Best Acc:"):
                 # Extract Best Acc and Best Epoch values
-                parts = line.strip().split(',')
+                parts = line.strip().split(",")
                 for part in parts:
-                    key, value = part.split(': ')
+                    key, value = part.split(": ")
                     info[key] = float(value)
             elif line.startswith("lr ="):
-                info['lr'] = float(line.split('=')[1].strip())
+                info["lr"] = float(line.split("=")[1].strip())
             elif line.startswith("num_epochs ="):
-                info['num_epochs'] = int(line.split('=')[1].strip())
+                info["num_epochs"] = int(line.split("=")[1].strip())
             elif line.startswith("batch_size ="):
-                info['batch_size'] = int(line.split('=')[1].strip())
+                info["batch_size"] = int(line.split("=")[1].strip())
             elif line.startswith("img_size ="):
-                info['img_size'] = int(line.split('=')[1].strip())
+                info["img_size"] = int(line.split("=")[1].strip())
             elif line.startswith("segment_hours ="):
-                info['segment_hours'] = int(line.split('=')[1].strip())
+                info["segment_hours"] = int(line.split("=")[1].strip())
     return info
+
 
 # Directory containing the files
 directory = "/gpfs/scratch/rayen/Oysters/output/"  # Replace with your directory path
